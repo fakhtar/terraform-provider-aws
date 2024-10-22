@@ -14,6 +14,8 @@ import (
     "github.com/hashicorp/terraform-provider-aws/internal/conns"
     "github.com/hashicorp/terraform-provider-aws/internal/tfresource"
     "github.com/hashicorp/terraform-provider-aws/internal/verify"
+    "github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
+
 )
 
 func ResourceBotAlias() *schema.Resource {
@@ -218,4 +220,162 @@ func resourceAwsLexV2ModelsBotAliasImport(ctx context.Context, d *schema.Resourc
 
     d.SetId(d.Id())
     return []*schema.ResourceData{d}, nil
+}
+
+// BotAliasParseID parses a bot alias ID into its component parts
+func BotAliasParseID(id string) (botAliasId, botId string, err error) {
+    parts := strings.Split(id, ":")
+    if len(parts) != 2 {
+        err = fmt.Errorf("invalid resource ID format. Expected 'bot_alias_id:bot_id', got: %s", id)
+        return
+    }
+    botAliasId = parts[0]
+    botId = parts[1]
+    return
+}
+
+// FindBotAliasByID returns the bot alias corresponding to the specified ID
+func FindBotAliasByID(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+    input := &lexmodelsv2.DescribeBotAliasInput{
+        BotAliasId: aws.String(botAliasId),
+        BotId:      aws.String(botId),
+    }
+
+    output, err := conn.DescribeBotAlias(ctx, input)
+    if err != nil {
+        return nil, err
+    }
+
+    if output == nil {
+        return nil, tfresource.NewEmptyResultError(input)
+    }
+
+    return output, nil
+}
+
+func statusBotAlias(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string) retry.StateRefreshFunc {
+    return func() (interface{}, string, error) {
+        output, err := FindBotAliasByID(ctx, conn, botAliasId, botId)
+        if tfresource.NotFound(err) {
+            return nil, "", nil
+        }
+        if err != nil {
+            return nil, "", err
+        }
+
+        return output, aws.ToString(output.BotAliasStatus), nil
+    }
+}
+
+func waitBotAliasCreated(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+    stateConf := &retry.StateChangeConf{
+        Pending: []string{lexmodelsv2.BotAliasStatusCreating},
+        Target:  []string{lexmodelsv2.BotAliasStatusAvailable},
+        Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
+        Timeout: timeout,
+    }
+
+    outputRaw, err := stateConf.WaitForStateContext(ctx)
+    if output, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+        return output, err
+    }
+
+    return nil, err
+}
+
+func waitBotAliasUpdated(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+    stateConf := &retry.StateChangeConf{
+        Pending: []string{lexmodelsv2.BotAliasStatusUpdating},
+        Target:  []string{lexmodelsv2.BotAliasStatusAvailable},
+        Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
+        Timeout: timeout,
+    }
+
+    outputRaw, err := stateConf.WaitForStateContext(ctx)
+    if output, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+        return output, err
+    }
+
+    return nil, err
+}
+
+func waitBotAliasDeleted(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+    stateConf := &retry.StateChangeConf{
+        Pending: []string{lexmodelsv2.BotAliasStatusDeleting},
+        Target:  []string{},
+        Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
+        Timeout: timeout,
+    }
+
+    outputRaw, err := stateConf.WaitForStateContext(ctx)
+    if output, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+        return output, err
+    }
+
+    return nil, err
+}
+
+// FindBotAliasByName retrieves a bot alias by its name and bot ID
+func FindBotAliasByName(ctx context.Context, conn *lexmodelsv2.Client, name, botId string) (*lexmodelsv2.BotAliasSummary, error) {
+    input := &lexmodelsv2.ListBotAliasesInput{
+        BotId: aws.String(botId),
+    }
+    var result *lexmodelsv2.BotAliasSummary
+
+    paginator := lexmodelsv2.NewListBotAliasesPaginator(conn, input)
+    for paginator.HasMorePages() {
+        output, err := paginator.NextPage(ctx)
+        if err != nil {
+            return nil, err
+        }
+
+        for _, alias := range output.BotAliasSummaries {
+            if aws.ToString(alias.BotAliasName) == name {
+                result = &alias
+                break
+            }
+        }
+
+        if result != nil {
+            break
+        }
+    }
+
+    if result == nil {
+        return nil, &retry.NotFoundError{
+            LastError: fmt.Errorf("Lex V2 Bot Alias (%s) not found", name),
+        }
+    }
+
+    return result, nil
+}
+
+// validateBotAliasName validates the bot alias name according to AWS specifications
+func validateBotAliasName(v interface{}, k string) (ws []string, errors []error) {
+    value := v.(string)
+    if len(value) < 1 || len(value) > 100 {
+        errors = append(errors, fmt.Errorf("%q length must be between 1 and 100 characters", k))
+    }
+
+    pattern := `^([A-Za-z]_?)+$`
+    if !regexp.MustCompile(pattern).MatchString(value) {
+        errors = append(errors, fmt.Errorf(
+            "%q must begin with a letter and contain only letters and underscores", k))
+    }
+    return
+}
+
+// validateBotVersion validates the bot version format
+func validateBotVersion(v interface{}, k string) (ws []string, errors []error) {
+    value := v.(string)
+    if len(value) < 1 || len(value) > 5 {
+        errors = append(errors, fmt.Errorf("%q length must be between 1 and 5 characters", k))
+    }
+
+    pattern := `^[0-9]+$`
+    if !regexp.MustCompile(pattern).MatchString(value) {
+        errors = append(errors, fmt.Errorf(
+            "%q must contain only numbers", k))
+    }
+    return
 }

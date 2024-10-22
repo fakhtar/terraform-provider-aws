@@ -317,3 +317,81 @@ resource "aws_lexv2models_bot_alias" "test" {
 }
 `, rName, tagKey1, tagValue1, tagKey2, tagValue2)
 }
+
+func testAccBotAliasConfig_basic(rName string) string {
+    return fmt.Sprintf(`
+resource "aws_lexv2models_bot" "test" {
+  name = %[1]q
+  data_privacy {
+    child_directed = false
+  }
+  idle_session_ttl_in_seconds = 300
+}
+
+resource "aws_lexv2models_bot_version" "test" {
+  bot_id = aws_lexv2models_bot.test.id
+}
+
+resource "aws_lexv2models_bot_alias" "test" {
+  bot_id      = aws_lexv2models_bot.test.id
+  bot_version = aws_lexv2models_bot_version.test.bot_version
+  name        = %[1]q
+  description = "Test bot alias"
+}
+`, rName)
+}
+
+func testAccBotAliasConfig_tags1(rName, tagKey1, tagValue1 string) string {
+    return fmt.Sprintf(`
+resource "aws_lexv2models_bot" "test" {
+  name = %[1]q
+  data_privacy {
+    child_directed = false
+  }
+  idle_session_ttl_in_seconds = 300
+}
+
+resource "aws_lexv2models_bot_version" "test" {
+  bot_id = aws_lexv2models_bot.test.id
+}
+
+resource "aws_lexv2models_bot_alias" "test" {
+  bot_id      = aws_lexv2models_bot.test.id
+  bot_version = aws_lexv2models_bot_version.test.bot_version
+  name        = %[1]q
+  description = "Test bot alias"
+
+  tags = {
+    %[2]q = %[3]q
+  }
+}
+`, rName, tagKey1, tagValue1)
+}
+
+func testAccBotAliasConfig_tags2(rName, tagKey1, tagValue1, tagKey2, tagValue2 string) string {
+    return fmt.Sprintf(`
+resource "aws_lexv2models_bot" "test" {
+  name = %[1]q
+  data_privacy {
+    child_directed = false
+  }
+  idle_session_ttl_in_seconds = 300
+}
+
+resource "aws_lexv2models_bot_version" "test" {
+  bot_id = aws_lexv2models_bot.test.id
+}
+
+resource "aws_lexv2models_bot_alias" "test" {
+  bot_id      = aws_lexv2models_bot.test.id
+  bot_version = aws_lexv2models_bot_version.test.bot_version
+  name        = %[1]q
+  description = "Test bot alias"
+
+  tags = {
+    %[2]q = %[3]q
+    %[4]q = %[5]q
+  }
+}
+`, rName, tagKey1, tagValue1, tagKey2, tagValue2)
+}
