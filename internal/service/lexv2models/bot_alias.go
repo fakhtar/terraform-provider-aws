@@ -1,4 +1,4 @@
-package lexmodelsv2
+package lexv2models
 
 import (
     "context"
@@ -7,7 +7,7 @@ import (
     "time"
 
     "github.com/aws/aws-sdk-go-v2/aws"
-    "github.com/aws/aws-sdk-go-v2/service/lexmodelsv2"
+    "github.com/aws/aws-sdk-go-v2/service/lexv2models"
     "github.com/hashicorp/terraform-plugin-sdk/v2/diag"
     "github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
     "github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -77,7 +77,7 @@ func resourceAwsLexV2ModelsBotAliasCreate(ctx context.Context, d *schema.Resourc
     conn := meta.(*conns.AWSClient).LexV2ModelsConn(ctx)
 
     name := d.Get("name").(string)
-    input := &lexmodelsv2.CreateBotAliasInput{
+    input := &lexv2models.CreateBotAliasInput{
         BotAliasName: aws.String(name),
         BotId:        aws.String(d.Get("bot_id").(string)),
         BotVersion:   aws.String(d.Get("bot_version").(string)),
@@ -155,7 +155,7 @@ func resourceAwsLexV2ModelsBotAliasUpdate(ctx context.Context, d *schema.Resourc
         return diag.FromErr(err)
     }
 
-    input := &lexmodelsv2.UpdateBotAliasInput{
+    input := &lexv2models.UpdateBotAliasInput{
         BotAliasId: aws.String(botAliasId),
         BotId:      aws.String(botId),
         BotVersion: aws.String(d.Get("bot_version").(string)),
@@ -192,14 +192,14 @@ func resourceAwsLexV2ModelsBotAliasDelete(ctx context.Context, d *schema.Resourc
         return diag.FromErr(err)
     }
 
-    input := &lexmodelsv2.DeleteBotAliasInput{
+    input := &lexv2models.DeleteBotAliasInput{
         BotAliasId: aws.String(botAliasId),
         BotId:      aws.String(botId),
     }
 
     _, err = conn.DeleteBotAlias(ctx, input)
     if err != nil {
-        if tfawserr.ErrCodeEquals(err, lexmodelsv2.ErrCodeResourceNotFoundException) {
+        if tfawserr.ErrCodeEquals(err, lexv2models.ErrCodeResourceNotFoundException) {
             return nil
         }
         return diag.Errorf("error deleting Lex V2 Bot Alias (%s): %s", d.Id(), err)
@@ -235,8 +235,8 @@ func BotAliasParseID(id string) (botAliasId, botId string, err error) {
 }
 
 // FindBotAliasByID returns the bot alias corresponding to the specified ID
-func FindBotAliasByID(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string) (*lexmodelsv2.DescribeBotAliasOutput, error) {
-    input := &lexmodelsv2.DescribeBotAliasInput{
+func FindBotAliasByID(ctx context.Context, conn *lexv2models.Client, botAliasId, botId string) (*lexv2models.DescribeBotAliasOutput, error) {
+    input := &lexv2models.DescribeBotAliasInput{
         BotAliasId: aws.String(botAliasId),
         BotId:      aws.String(botId),
     }
@@ -253,7 +253,7 @@ func FindBotAliasByID(ctx context.Context, conn *lexmodelsv2.Client, botAliasId,
     return output, nil
 }
 
-func statusBotAlias(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string) retry.StateRefreshFunc {
+func statusBotAlias(ctx context.Context, conn *lexv2models.Client, botAliasId, botId string) retry.StateRefreshFunc {
     return func() (interface{}, string, error) {
         output, err := FindBotAliasByID(ctx, conn, botAliasId, botId)
         if tfresource.NotFound(err) {
@@ -267,48 +267,48 @@ func statusBotAlias(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, b
     }
 }
 
-func waitBotAliasCreated(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+func waitBotAliasCreated(ctx context.Context, conn *lexv2models.Client, botAliasId, botId string, timeout time.Duration) (*lexv2models.DescribeBotAliasOutput, error) {
     stateConf := &retry.StateChangeConf{
-        Pending: []string{lexmodelsv2.BotAliasStatusCreating},
-        Target:  []string{lexmodelsv2.BotAliasStatusAvailable},
+        Pending: []string{lexv2models.BotAliasStatusCreating},
+        Target:  []string{lexv2models.BotAliasStatusAvailable},
         Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
         Timeout: timeout,
     }
 
     outputRaw, err := stateConf.WaitForStateContext(ctx)
-    if output, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+    if output, ok := outputRaw.(*lexv2models.DescribeBotAliasOutput); ok {
         return output, err
     }
 
     return nil, err
 }
 
-func waitBotAliasUpdated(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+func waitBotAliasUpdated(ctx context.Context, conn *lexv2models.Client, botAliasId, botId string, timeout time.Duration) (*lexv2models.DescribeBotAliasOutput, error) {
     stateConf := &retry.StateChangeConf{
-        Pending: []string{lexmodelsv2.BotAliasStatusUpdating},
-        Target:  []string{lexmodelsv2.BotAliasStatusAvailable},
+        Pending: []string{lexv2models.BotAliasStatusUpdating},
+        Target:  []string{lexv2models.BotAliasStatusAvailable},
         Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
         Timeout: timeout,
     }
 
     outputRaw, err := stateConf.WaitForStateContext(ctx)
-    if output, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+    if output, ok := outputRaw.(*lexv2models.DescribeBotAliasOutput); ok {
         return output, err
     }
 
     return nil, err
 }
 
-func waitBotAliasDeleted(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+func waitBotAliasDeleted(ctx context.Context, conn *lexv2models.Client, botAliasId, botId string, timeout time.Duration) (*lexv2models.DescribeBotAliasOutput, error) {
     stateConf := &retry.StateChangeConf{
-        Pending: []string{lexmodelsv2.BotAliasStatusDeleting},
+        Pending: []string{lexv2models.BotAliasStatusDeleting},
         Target:  []string{},
         Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
         Timeout: timeout,
     }
 
     outputRaw, err := stateConf.WaitForStateContext(ctx)
-    if output, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+    if output, ok := outputRaw.(*lexv2models.DescribeBotAliasOutput); ok {
         return output, err
     }
 
@@ -316,13 +316,13 @@ func waitBotAliasDeleted(ctx context.Context, conn *lexmodelsv2.Client, botAlias
 }
 
 // FindBotAliasByName retrieves a bot alias by its name and bot ID
-func FindBotAliasByName(ctx context.Context, conn *lexmodelsv2.Client, name, botId string) (*lexmodelsv2.BotAliasSummary, error) {
-    input := &lexmodelsv2.ListBotAliasesInput{
+func FindBotAliasByName(ctx context.Context, conn *lexv2models.Client, name, botId string) (*lexv2models.BotAliasSummary, error) {
+    input := &lexv2models.ListBotAliasesInput{
         BotId: aws.String(botId),
     }
-    var result *lexmodelsv2.BotAliasSummary
+    var result *lexv2models.BotAliasSummary
 
-    paginator := lexmodelsv2.NewListBotAliasesPaginator(conn, input)
+    paginator := lexv2models.NewListBotAliasesPaginator(conn, input)
     for paginator.HasMorePages() {
         output, err := paginator.NextPage(ctx)
         if err != nil {
