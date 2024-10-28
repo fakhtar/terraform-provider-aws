@@ -1,12 +1,12 @@
-package lexmodelsv2
+package lexv2models
 
 import (
     "context"
     "fmt"
     "testing"
 
-    "github.com/aws/aws-sdk-go-v2/service/lexmodelsv2"
-    "github.com/aws/aws-sdk-go-v2/service/lexmodelsv2/types"
+    "github.com/aws/aws-sdk-go-v2/service/lexv2models"
+    "github.com/aws/aws-sdk-go-v2/service/lexv2models/types"
     "github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
     "github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
     "github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -18,16 +18,16 @@ import (
 // Basic CRUD Test
 func TestAccLexV2ModelsBot_basic(t *testing.T) {
     ctx := context.Background()
-    var botAlias lexmodelsv2.DescribeBotAliasOutput
+    var botAlias lexv2models.DescribeBotAliasOutput
     rName := fmt.Sprintf("tf-test-bot-%s", acctest.RandString(8))
     resourceName := "aws_lexv2models_bot_alias.test"
 
     resource.ParallelTest(t, resource.TestCase{
         PreCheck: func() {
             acctest.PreCheck(t)
-            acctest.PreCheckPartitionHasService(lexmodelsv2.EndpointsID, t)
+            acctest.PreCheckPartitionHasService(lexv2models.EndpointsID, t)
         },
-        ErrorCheck:               acctest.ErrorCheck(t, lexmodelsv2.EndpointsID),
+        ErrorCheck:               acctest.ErrorCheck(t, lexv2models.EndpointsID),
         ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
         CheckDestroy:             testAccCheckBotAliasDestroy(ctx),
         Steps: []resource.TestStep{
@@ -57,16 +57,16 @@ func TestAccLexV2ModelsBot_basic(t *testing.T) {
 // Import Test
 func TestAccLexV2ModelsBot_import(t *testing.T) {
     ctx := context.Background()
-    var botAlias lexmodelsv2.DescribeBotAliasOutput
+    var botAlias lexv2models.DescribeBotAliasOutput
     rName := fmt.Sprintf("tf-test-bot-%s", acctest.RandString(8))
     resourceName := "aws_lexv2models_bot_alias.test"
 
     resource.ParallelTest(t, resource.TestCase{
         PreCheck: func() {
             acctest.PreCheck(t)
-            acctest.PreCheckPartitionHasService(lexmodelsv2.EndpointsID, t)
+            acctest.PreCheckPartitionHasService(lexv2models.EndpointsID, t)
         },
-        ErrorCheck:               acctest.ErrorCheck(t, lexmodelsv2.EndpointsID),
+        ErrorCheck:               acctest.ErrorCheck(t, lexv2models.EndpointsID),
         ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
         CheckDestroy:             testAccCheckBotAliasDestroy(ctx),
         Steps: []resource.TestStep{
@@ -88,16 +88,16 @@ func TestAccLexV2ModelsBot_import(t *testing.T) {
 // Disappears Test
 func TestAccLexV2ModelsBot_disappears(t *testing.T) {
     ctx := context.Background()
-    var botAlias lexmodelsv2.DescribeBotAliasOutput
+    var botAlias lexv2models.DescribeBotAliasOutput
     rName := fmt.Sprintf("tf-test-bot-%s", acctest.RandString(8))
     resourceName := "aws_lexv2models_bot_alias.test"
 
     resource.ParallelTest(t, resource.TestCase{
         PreCheck: func() {
             acctest.PreCheck(t)
-            acctest.PreCheckPartitionHasService(lexmodelsv2.EndpointsID, t)
+            acctest.PreCheckPartitionHasService(lexv2models.EndpointsID, t)
         },
-        ErrorCheck:               acctest.ErrorCheck(t, lexmodelsv2.EndpointsID),
+        ErrorCheck:               acctest.ErrorCheck(t, lexv2models.EndpointsID),
         ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
         CheckDestroy:             testAccCheckBotAliasDestroy(ctx),
         Steps: []resource.TestStep{
@@ -116,16 +116,16 @@ func TestAccLexV2ModelsBot_disappears(t *testing.T) {
 // Tags Test
 func TestAccLexV2ModelsBot_tags(t *testing.T) {
     ctx := context.Background()
-    var botAlias lexmodelsv2.DescribeBotAliasOutput
+    var botAlias lexv2models.DescribeBotAliasOutput
     rName := fmt.Sprintf("tf-test-bot-%s", acctest.RandString(8))
     resourceName := "aws_lexv2models_bot_alias.test"
 
     resource.ParallelTest(t, resource.TestCase{
         PreCheck: func() {
             acctest.PreCheck(t)
-            acctest.PreCheckPartitionHasService(lexmodelsv2.EndpointsID, t)
+            acctest.PreCheckPartitionHasService(lexv2models.EndpointsID, t)
         },
-        ErrorCheck:               acctest.ErrorCheck(t, lexmodelsv2.EndpointsID),
+        ErrorCheck:               acctest.ErrorCheck(t, lexv2models.EndpointsID),
         ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
         CheckDestroy:             testAccCheckBotAliasDestroy(ctx),
         Steps: []resource.TestStep{
@@ -182,7 +182,7 @@ func testAccCheckBotAliasDestroy(ctx context.Context) resource.TestCheckFunc {
     }
 }
 
-func testAccCheckBotAliasExists(ctx context.Context, n string, v *lexmodelsv2.DescribeBotAliasOutput) resource.TestCheckFunc {
+func testAccCheckBotAliasExists(ctx context.Context, n string, v *lexv2models.DescribeBotAliasOutput) resource.TestCheckFunc {
     return func(s *terraform.State) error {
         rs, ok := s.RootModule().Resources[n]
         if !ok {
