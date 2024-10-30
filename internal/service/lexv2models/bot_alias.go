@@ -1,13 +1,9 @@
-// Copyright (c) HashiCorp, Inc.
-// SPDX-License-Identifier: MPL-2.0
-
 package lexv2models
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -15,8 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lexmodelsv2"
 	awstypes "github.com/aws/aws-sdk-go-v2/service/lexmodelsv2/types"
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -33,10 +29,9 @@ import (
 )
 
 // @FrameworkResource(name="Bot Alias")
-// @Tags(identifierAttribute="arn")
 func newResourceBotAlias(_ context.Context) (resource.ResourceWithConfigure, error) {
 	r := &resourceBotAlias{}
-
+	
 	r.SetDefaultCreateTimeout(30 * time.Minute)
 	r.SetDefaultUpdateTimeout(30 * time.Minute)
 	r.SetDefaultDeleteTimeout(30 * time.Minute)
@@ -63,9 +58,12 @@ func (r *resourceBotAlias) Schema(ctx context.Context, req resource.SchemaReques
 			names.AttrARN: framework.ARNAttributeComputedOnly(),
 			"bot_alias_id": schema.StringAttribute{
 				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
-			"bot_alias_status": schema.StringAttribute{
-				Computed: true,
+			"bot_alias_name": schema.StringAttribute{
+				Required: true,
 			},
 			"bot_id": schema.StringAttribute{
 				Required: true,
@@ -76,20 +74,23 @@ func (r *resourceBotAlias) Schema(ctx context.Context, req resource.SchemaReques
 			"bot_version": schema.StringAttribute{
 				Required: true,
 			},
-			names.AttrDescription: schema.StringAttribute{
+			"description": schema.StringAttribute{
 				Optional: true,
 			},
 			names.AttrID: framework.IDAttribute(),
-			names.AttrName: schema.StringAttribute{
-				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
 			names.AttrTags:    tftags.TagsAttribute(),
 			names.AttrTagsAll: tftags.TagsAttributeComputedOnly(),
 		},
 		Blocks: map[string]schema.Block{
+			"sentiment_analysis_settings": schema.ListNestedBlock{
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						"detect_sentiment": schema.BoolAttribute{
+							Required: true,
+						},
+					},
+				},
+			},
 			names.AttrTimeouts: timeouts.Block(ctx, timeouts.Opts{
 				Create: true,
 				Update: true,
@@ -109,8 +110,8 @@ func (r *resourceBotAlias) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	in := &lexmodelsv2.CreateBotAliasInput{
-		BotAliasName: aws.String(plan.Name.ValueString()),
-		BotId:        aws.String(plan.BotID.ValueString()),
+		BotAliasName: aws.String(plan.BotAliasName.ValueString()),
+		BotId:        aws.String(plan.BotId.ValueString()),
 		BotVersion:   aws.String(plan.BotVersion.ValueString()),
 		Tags:         getTagsIn(ctx),
 	}
@@ -119,37 +120,36 @@ func (r *resourceBotAlias) Create(ctx context.Context, req resource.CreateReques
 		in.Description = aws.String(plan.Description.ValueString())
 	}
 
+	if !plan.SentimentAnalysisSettings.IsNull() {
+		var tfList []sentimentAnalysisSettingsData
+		resp.Diagnostics.Append(plan.SentimentAnalysisSettings.ElementsAs(ctx, &tfList, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		in.SentimentAnalysisSettings = expandSentimentAnalysisSettings(ctx, tfList)
+	}
+
 	out, err := conn.CreateBotAlias(ctx, in)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			create.ProblemStandardMessage(names.LexV2Models, create.ErrActionCreating, ResNameBotAlias, plan.Name.String(), err),
+			create.ProblemStandardMessage(names.LexV2Models, create.ErrActionCreating, ResNameBotAlias, plan.BotAliasName.String(), err),
 			err.Error(),
 		)
 		return
 	}
-	if out == nil {
+	if out == nil || out.BotAliasId == nil {
 		resp.Diagnostics.AddError(
-			create.ProblemStandardMessage(names.LexV2Models, create.ErrActionCreating, ResNameBotAlias, plan.Name.String(), nil),
+			create.ProblemStandardMessage(names.LexV2Models, create.ErrActionCreating, ResNameBotAlias, plan.BotAliasName.String(), nil),
 			errors.New("empty output").Error(),
 		)
 		return
 	}
 
-	id := fmt.Sprintf("%s:%s", aws.ToString(out.BotAliasId), plan.BotID.ValueString())
-	plan.ID = flex.StringToFramework(ctx, &id)
-	plan.BotAliasID = flex.StringToFramework(ctx, out.BotAliasId)
-
-	botAliasArn := arn.ARN{
-		Partition: r.Meta().Partition,
-		Service:   "lex",
-		Region:    r.Meta().Region,
-		AccountID: r.Meta().AccountID,
-		Resource:  fmt.Sprintf("bot-alias/%s", aws.ToString(out.BotAliasId)),
-	}.String()
-	plan.ARN = flex.StringToFramework(ctx, &botAliasArn)
+	plan.ID = types.StringValue(aws.ToString(out.BotAliasId))
+	plan.BotAliasId = types.StringValue(aws.ToString(out.BotAliasId))
 
 	createTimeout := r.CreateTimeout(ctx, plan.Timeouts)
-	_, err = waitBotAliasCreated(ctx, conn, plan.BotAliasID.ValueString(), plan.BotID.ValueString(), createTimeout)
+	_, err = waitBotAliasCreated(ctx, conn, plan.BotId.ValueString(), plan.ID.ValueString(), createTimeout)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			create.ProblemStandardMessage(names.LexV2Models, create.ErrActionWaitingForCreation, ResNameBotAlias, plan.ID.String(), err),
@@ -158,28 +158,59 @@ func (r *resourceBotAlias) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	// Set computed values
+	botArn := arn.ARN{
+		Partition: r.Meta().Partition,
+		Service:   "lex",
+		Region:    r.Meta().Region,
+		AccountID: r.Meta().AccountID,
+		Resource:  fmt.Sprintf("bot-alias/%s", aws.ToString(out.BotAliasId)),
+	}.String()
+	plan.ARN = types.StringValue(botArn)
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
+// Other CRUD operations and helper functions will follow...
+
+type resourceBotAliasData struct {
+	ARN                       types.String   `tfsdk:"arn"`
+	BotAliasId               types.String   `tfsdk:"bot_alias_id"`
+	BotAliasName             types.String   `tfsdk:"bot_alias_name"`
+	BotId                    types.String   `tfsdk:"bot_id"`
+	BotVersion               types.String   `tfsdk:"bot_version"`
+	Description              types.String   `tfsdk:"description"`
+	ID                       types.String   `tfsdk:"id"`
+	SentimentAnalysisSettings types.List     `tfsdk:"sentiment_analysis_settings"`
+	Tags                     types.Map      `tfsdk:"tags"`
+	TagsAll                  types.Map      `tfsdk:"tags_all"`
+	Timeouts                 timeouts.Value `tfsdk:"timeouts"`
+}
+
+type sentimentAnalysisSettingsData struct {
+	DetectSentiment types.Bool `tfsdk:"detect_sentiment"`
+}
+
+func expandSentimentAnalysisSettings(ctx context.Context, tfList []sentimentAnalysisSettingsData) *awstypes.SentimentAnalysisSettings {
+	if len(tfList) == 0 {
+		return nil
+	}
+
+	return &awstypes.SentimentAnalysisSettings{
+		DetectSentiment: tfList[0].DetectSentiment.ValueBool(),
+	}
+}
+
+// Read operation implementation
 func (r *resourceBotAlias) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	conn := r.Meta().LexV2ModelsClient(ctx)
-
 	var state resourceBotAliasData
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	botAliasId, botId, err := BotAliasParseID(state.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			create.ProblemStandardMessage(names.LexV2Models, create.ErrActionReading, ResNameBotAlias, state.ID.String(), err),
-			err.Error(),
-		)
-		return
-	}
-
-	out, err := FindBotAliasByID(ctx, conn, botAliasId, botId)
+	out, err := FindBotAliasByID(ctx, conn, state.BotId.ValueString(), state.ID.ValueString())
 	if tfresource.NotFound(err) {
 		resp.State.RemoveResource(ctx)
 		return
@@ -192,16 +223,32 @@ func (r *resourceBotAlias) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	state.BotID = flex.StringToFramework(ctx, &botId)
-	diags := state.refreshFromOutput(ctx, out)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+	state.BotAliasName = flex.StringToFramework(ctx, out.BotAliasName)
+	state.BotVersion = flex.StringToFramework(ctx, out.BotVersion)
+	state.Description = flex.StringToFramework(ctx, out.Description)
+
+	botArn := arn.ARN{
+		Partition: r.Meta().Partition,
+		Service:   "lex",
+		Region:    r.Meta().Region,
+		AccountID: r.Meta().AccountID,
+		Resource:  fmt.Sprintf("bot-alias/%s", aws.ToString(out.BotAliasId)),
+	}.String()
+	state.ARN = types.StringValue(botArn)
+
+	if out.SentimentAnalysisSettings != nil {
+		settings, d := flattenSentimentAnalysisSettings(ctx, out.SentimentAnalysisSettings)
+		resp.Diagnostics.Append(d...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.SentimentAnalysisSettings = settings
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// Update operation implementation
 func (r *resourceBotAlias) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	conn := r.Meta().LexV2ModelsClient(ctx)
 
@@ -212,42 +259,45 @@ func (r *resourceBotAlias) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	if !plan.Description.Equal(state.Description) ||
-		!plan.BotVersion.Equal(state.BotVersion) {
-
-		botAliasId, botId, err := BotAliasParseID(state.ID.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError(
-				create.ProblemStandardMessage(names.LexV2Models, create.ErrActionUpdating, ResNameBotAlias, state.ID.String(), err),
-				err.Error(),
-			)
-			return
-		}
+	if !plan.BotAliasName.Equal(state.BotAliasName) ||
+		!plan.BotVersion.Equal(state.BotVersion) ||
+		!plan.Description.Equal(state.Description) ||
+		!plan.SentimentAnalysisSettings.Equal(state.SentimentAnalysisSettings) {
 
 		in := &lexmodelsv2.UpdateBotAliasInput{
-			BotAliasId: aws.String(botAliasId),
-			BotId:      aws.String(botId),
-			BotVersion: aws.String(plan.BotVersion.ValueString()),
+			BotAliasId:   aws.String(plan.ID.ValueString()),
+			BotId:        aws.String(plan.BotId.ValueString()),
+			BotAliasName: aws.String(plan.BotAliasName.ValueString()),
+			BotVersion:   aws.String(plan.BotVersion.ValueString()),
 		}
 
 		if !plan.Description.IsNull() {
 			in.Description = aws.String(plan.Description.ValueString())
 		}
 
-		_, err = conn.UpdateBotAlias(ctx, in)
+		if !plan.SentimentAnalysisSettings.IsNull() {
+			var tfList []sentimentAnalysisSettingsData
+			resp.Diagnostics.Append(plan.SentimentAnalysisSettings.ElementsAs(ctx, &tfList, false)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			in.SentimentAnalysisSettings = expandSentimentAnalysisSettings(ctx, tfList)
+		}
+
+		_, err := conn.UpdateBotAlias(ctx, in)
 		if err != nil {
 			resp.Diagnostics.AddError(
-				create.ProblemStandardMessage(names.LexV2Models, create.ErrActionUpdating, ResNameBotAlias, state.ID.String(), err),
+				create.ProblemStandardMessage(names.LexV2Models, create.ErrActionUpdating, ResNameBotAlias, plan.ID.String(), err),
 				err.Error(),
 			)
 			return
 		}
 
 		updateTimeout := r.UpdateTimeout(ctx, plan.Timeouts)
-		_, err = waitBotAliasUpdated(ctx, conn, botAliasId, botId, updateTimeout)
+		_, err = waitBotAliasUpdated(ctx, conn, plan.BotId.ValueString(), plan.ID.ValueString(), updateTimeout)
 		if err != nil {
 			resp.Diagnostics.AddError(
-				create.ProblemStandardMessage(names.LexV2Models, create.ErrActionWaitingForUpdate, ResNameBotAlias, state.ID.String(), err),
+				create.ProblemStandardMessage(names.LexV2Models, create.ErrActionWaitingForUpdate, ResNameBotAlias, plan.ID.String(), err),
 				err.Error(),
 			)
 			return
@@ -257,6 +307,7 @@ func (r *resourceBotAlias) Update(ctx context.Context, req resource.UpdateReques
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
+// Delete operation implementation
 func (r *resourceBotAlias) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	conn := r.Meta().LexV2ModelsClient(ctx)
 
@@ -266,21 +317,12 @@ func (r *resourceBotAlias) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	botAliasId, botId, err := BotAliasParseID(state.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			create.ProblemStandardMessage(names.LexV2Models, create.ErrActionDeleting, ResNameBotAlias, state.ID.String(), err),
-			err.Error(),
-		)
-		return
-	}
-
 	in := &lexmodelsv2.DeleteBotAliasInput{
-		BotAliasId: aws.String(botAliasId),
-		BotId:      aws.String(botId),
+		BotAliasId: aws.String(state.ID.ValueString()),
+		BotId:      aws.String(state.BotId.ValueString()),
 	}
 
-	_, err = conn.DeleteBotAlias(ctx, in)
+	_, err := conn.DeleteBotAlias(ctx, in)
 	if err != nil {
 		if errs.IsA[*awstypes.ResourceNotFoundException](err) {
 			return
@@ -293,7 +335,7 @@ func (r *resourceBotAlias) Delete(ctx context.Context, req resource.DeleteReques
 	}
 
 	deleteTimeout := r.DeleteTimeout(ctx, state.Timeouts)
-	_, err = waitBotAliasDeleted(ctx, conn, botAliasId, botId, deleteTimeout)
+	_, err = waitBotAliasDeleted(ctx, conn, state.BotId.ValueString(), state.ID.ValueString(), deleteTimeout)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			create.ProblemStandardMessage(names.LexV2Models, create.ErrActionWaitingForDeletion, ResNameBotAlias, state.ID.String(), err),
@@ -303,94 +345,69 @@ func (r *resourceBotAlias) Delete(ctx context.Context, req resource.DeleteReques
 	}
 }
 
-func (r *resourceBotAlias) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	r.SetTagsAll(ctx, req, resp)
-}
+// Waiter implementations
+const (
+	BotAliasStatusCreating  = "Creating"
+	BotAliasStatusUpdating  = "Updating"
+	BotAliasStatusAvailable = "Available"
+	BotAliasStatusDeleting  = "Deleting"
+)
 
-func (r *resourceBotAlias) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root(names.AttrID), req, resp)
-}
-
-type resourceBotAliasData struct {
-	ARN            types.String   `tfsdk:"arn"`
-	BotAliasID     types.String   `tfsdk:"bot_alias_id"`
-	BotAliasStatus types.String   `tfsdk:"bot_alias_status"`
-	BotID          types.String   `tfsdk:"bot_id"`
-	BotVersion     types.String   `tfsdk:"bot_version"`
-	Description    types.String   `tfsdk:"description"`
-	ID             types.String   `tfsdk:"id"`
-	Name           types.String   `tfsdk:"name"`
-	Tags           tftags.Map     `tfsdk:"tags"`
-	TagsAll        tftags.Map     `tfsdk:"tags_all"`
-	Timeouts       timeouts.Value `tfsdk:"timeouts"`
-}
-
-func (rd *resourceBotAliasData) refreshFromOutput(ctx context.Context, out *lexmodelsv2.DescribeBotAliasOutput) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	if out == nil {
-		return diags
+func waitBotAliasCreated(ctx context.Context, conn *lexmodelsv2.Client, botID, botAliasID string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+	stateConf := &retry.StateChangeConf{
+		Pending:                   []string{BotAliasStatusCreating},
+		Target:                    []string{BotAliasStatusAvailable},
+		Refresh:                   statusBotAlias(ctx, conn, botID, botAliasID),
+		Timeout:                   timeout,
+		NotFoundChecks:            20,
+		ContinuousTargetOccurence: 2,
 	}
 
-	rd.BotAliasID = flex.StringToFramework(ctx, out.BotAliasId)
-	rd.BotAliasStatus = flex.StringToFramework(ctx, (*string)(&out.BotAliasStatus))
-	rd.BotVersion = flex.StringToFramework(ctx, out.BotVersion)
-	rd.Description = flex.StringToFramework(ctx, out.Description)
-	rd.Name = flex.StringToFramework(ctx, out.BotAliasName)
+	outputRaw, err := stateConf.WaitForStateContext(ctx)
+	if out, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+		return out, err
+	}
 
-	return diags
-}
-func waitBotAliasCreated(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
-    stateConf := &retry.StateChangeConf{
-        Pending: []string{string(awstypes.BotStatusCreating)},
-        Target:  []string{string(awstypes.BotStatusAvailable)},
-        Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
-        Timeout: timeout,
-    }
-
-    outputRaw, err := stateConf.WaitForStateContext(ctx)
-    if out, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
-        return out, err
-    }
-
-    return nil, err
+	return nil, err
 }
 
-func waitBotAliasUpdated(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
-    stateConf := &retry.StateChangeConf{
-        Pending: []string{string(awstypes.BotStatusUpdating)},
-        Target:  []string{string(awstypes.BotStatusAvailable)},
-        Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
-        Timeout: timeout,
-    }
+func waitBotAliasUpdated(ctx context.Context, conn *lexmodelsv2.Client, botID, botAliasID string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+	stateConf := &retry.StateChangeConf{
+		Pending:                   []string{BotAliasStatusUpdating},
+		Target:                    []string{BotAliasStatusAvailable},
+		Refresh:                   statusBotAlias(ctx, conn, botID, botAliasID),
+		Timeout:                   timeout,
+		NotFoundChecks:            20,
+		ContinuousTargetOccurence: 2,
+	}
 
-    outputRaw, err := stateConf.WaitForStateContext(ctx)
-    if out, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
-        return out, err
-    }
+	outputRaw, err := stateConf.WaitForStateContext(ctx)
+	if out, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+		return out, err
+	}
 
-    return nil, err
+	return nil, err
 }
 
-func waitBotAliasDeleted(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
-    stateConf := &retry.StateChangeConf{
-        Pending: []string{string(awstypes.BotStatusDeleting)},
-        Target:  []string{},
-        Refresh: statusBotAlias(ctx, conn, botAliasId, botId),
-        Timeout: timeout,
-    }
+func waitBotAliasDeleted(ctx context.Context, conn *lexmodelsv2.Client, botID, botAliasID string, timeout time.Duration) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+	stateConf := &retry.StateChangeConf{
+		Pending: []string{BotAliasStatusDeleting},
+		Target:  []string{},
+		Refresh: statusBotAlias(ctx, conn, botID, botAliasID),
+		Timeout: timeout,
+	}
 
-    outputRaw, err := stateConf.WaitForStateContext(ctx)
-    if out, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
-        return out, err
-    }
+	outputRaw, err := stateConf.WaitForStateContext(ctx)
+	if out, ok := outputRaw.(*lexmodelsv2.DescribeBotAliasOutput); ok {
+		return out, err
+	}
 
-    return nil, err
+	return nil, err
 }
 
-func statusBotAlias(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string) retry.StateRefreshFunc {
+func statusBotAlias(ctx context.Context, conn *lexmodelsv2.Client, botID, botAliasID string) retry.StateRefreshFunc {
 	return func() (interface{}, string, error) {
-		out, err := FindBotAliasByID(ctx, conn, botAliasId, botId)
+		out, err := FindBotAliasByID(ctx, conn, botID, botAliasID)
 		if tfresource.NotFound(err) {
 			return nil, "", nil
 		}
@@ -403,10 +420,10 @@ func statusBotAlias(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, b
 	}
 }
 
-func FindBotAliasByID(ctx context.Context, conn *lexmodelsv2.Client, botAliasId, botId string) (*lexmodelsv2.DescribeBotAliasOutput, error) {
+func FindBotAliasByID(ctx context.Context, conn *lexmodelsv2.Client, botID, botAliasID string) (*lexmodelsv2.DescribeBotAliasOutput, error) {
 	in := &lexmodelsv2.DescribeBotAliasInput{
-		BotAliasId: aws.String(botAliasId),
-		BotId:      aws.String(botId),
+		BotAliasId: aws.String(botAliasID),
+		BotId:      aws.String(botID),
 	}
 
 	out, err := conn.DescribeBotAlias(ctx, in)
@@ -421,21 +438,31 @@ func FindBotAliasByID(ctx context.Context, conn *lexmodelsv2.Client, botAliasId,
 		return nil, err
 	}
 
-	if out == nil {
+	if out == nil || out.BotAliasId == nil {
 		return nil, tfresource.NewEmptyResultError(in)
 	}
 
 	return out, nil
 }
 
-func BotAliasParseID(id string) (botAliasId, botId string, err error) {
-	parts := strings.Split(id, ":")
-	if len(parts) != 2 {
-		err = fmt.Errorf("unexpected format of ID (%s), expected BOT-ALIAS-ID:BOT-ID", id)
-		return
+func flattenSentimentAnalysisSettings(ctx context.Context, apiObject *awstypes.SentimentAnalysisSettings) (types.List, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	elemType := types.ObjectType{AttrTypes: map[string]attr.Type{
+		"detect_sentiment": types.BoolType,
+	}}
+
+	if apiObject == nil {
+		return types.ListNull(elemType), diags
 	}
 
-	botAliasId = parts[0]
-	botId = parts[1]
-	return
+	obj := map[string]attr.Value{
+		"detect_sentiment": types.BoolValue(apiObject.DetectSentiment),
+	}
+	objVal, d := types.ObjectValue(elemType.AttrTypes, obj)
+	diags.Append(d...)
+
+	listVal, d := types.ListValue(elemType, []attr.Value{objVal})
+	diags.Append(d...)
+
+	return listVal, diags
 }
